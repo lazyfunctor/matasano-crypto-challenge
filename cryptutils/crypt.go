@@ -71,12 +71,15 @@ var charFreq = map[byte]float64 {
 }
 const penalty = 0.127
 
-var globalKey []byte
+var GlobalKey []byte
 var globalIV []byte
+var RandPrefix []byte
 
 func init() {
-	globalKey, _ = GenerateRandomKey(16)
+	GlobalKey, _ = GenerateRandomKey(16)
 	globalIV, _ = GenerateRandomKey(16)
+	count, _ := rand.Int(rand.Reader, big.NewInt(100))
+	RandPrefix, _ = GenerateRandomKey(int(count.Int64()) + 1)
 }
 
 func calcScore(val []byte) float64 {
@@ -354,16 +357,42 @@ YnkK`
 	plainText := make([]byte, len(payload) + len(input))
 	copy(plainText[:len(input)], input)
 	copy(plainText[len(input):], payload)
-	result := EncryptECB(plainText, globalKey)
+	result := EncryptECB(plainText, GlobalKey)
 	return result, nil
 }
+
+
+
+// Oracle for challange 14
+type Oracle3 struct {}
+
+func (e Oracle3) EncryptionOracle(input []byte) ([]byte, error) {
+	var nilByte []byte
+	payloadB64 := `Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkg
+aGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBq
+dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg
+YnkK`
+	payload, decErr := base64.StdEncoding.DecodeString(payloadB64)
+	//fmt.Println("Payload", string(payload))
+	if decErr != nil  {
+		return nilByte, decErr
+	}
+	plainText := make([]byte, len(payload) + len(input) + len(RandPrefix))
+	copy(plainText[:len(RandPrefix)], RandPrefix)
+	copy(plainText[len(RandPrefix): (len(RandPrefix) + len(input))], input)
+	copy(plainText[(len(RandPrefix) + len(input)):], payload)
+	result := EncryptECB(plainText, GlobalKey)
+	return result, nil
+}
+
+
 
 type BlackBox interface {
 	EncryptionOracle(input []byte) ([]byte, error)
 }
 
 
-func analyzeECBBlock(cipher []byte) int {
+func analyzeECBBlock(cipher []byte) (int, []byte) {
 	size := len(cipher)
 	counter := make(map[string]int)
 	bs := aes.BlockSize
@@ -374,12 +403,14 @@ func analyzeECBBlock(cipher []byte) int {
 		bc += 1
 	}
 	maxCount := 0
-	for _, v := range(counter) {
+	block := []byte {}
+	for k, v := range(counter) {
 		if v > maxCount {
 			maxCount = v
+			block = []byte(k)
 		}
 	}
-	return maxCount
+	return maxCount, block
 }
 
 
@@ -393,23 +424,8 @@ func DetectionOracle(box BlackBox) (string, error) {
 		return "", err
 	}
 
-	// size := len(cipher)
-	// counter := make(map[string]int)
-	// bs := aes.BlockSize
-	// bc := 1
-	// for bc*bs <= size {
-	// 	key := string(cipher[(bc-1)*bs: bc*bs])
-	// 	counter[key] += 1
-	// 	bc += 1
-	// }
-	// maxCount := 0
-	// for _, v := range(counter) {
-	// 	if v > maxCount {
-	// 		maxCount = v
-	// 	}
-	// }
 	
-	maxCount := analyzeECBBlock(cipher)
+	maxCount, _ := analyzeECBBlock(cipher)
 
 	if maxCount >= 3 {
 		return "ECB", nil
@@ -419,25 +435,68 @@ func DetectionOracle(box BlackBox) (string, error) {
 }
 
 
-func generateDict(box BlackBox, crafted []byte, block []byte, prevBlock []byte, idx int, bc int) map[string]byte {
+func generateDict(box BlackBox, block []byte, prevBlock []byte, idx int, filler []byte, bc int) map[string]byte {
 	dict := make(map[string]byte)
 	//prefix := make([]byte, (bc - 1) * 16)
 	//initial := append(prefix, crafted...)
 	var initial []byte
-	if bc == 1 {
-		initial = crafted
-	} else {
-		initial = prevBlock[16 - idx:]
-	}
+	initial = prevBlock[16 - idx:]
+	// if bc == 1 {
+	// 	initial = crafted
+	// } else {
+	// 	initial = prevBlock[16 - idx:]
+	// }
 	craftedByte := append(initial, block[:15-idx]...)
+	craftedWithFiller := append(filler, craftedByte...)
 	for i := 0; i <= 255; i++ {
-		input := append(craftedByte, byte(i))
+		input := append(craftedWithFiller, byte(i))
 		//fmt.Println("input", input)
 		cipher, _ := box.EncryptionOracle(input)
 		//fmt.Println("key", cipher[:16])
-		dict[string(cipher[:16])] = byte(i)
+		dict[string(cipher[(bc-1)*16:bc*16])] = byte(i)
 	}
 	return dict
+}
+
+
+func decodeECB(box BlackBox, filler []byte, initBlocks int, totalBlocks int) []byte {
+	block := make([]byte, 16)
+	//prevBlock := make([]byte, 16)
+	prevBlock := bytes.Repeat([]byte("A"), 16)
+	//fmt.Println(payloadSize)
+	//out := make([]byte, payloadSize)
+	out := []byte {}
+	//totalBlocks = 1
+	for bc := initBlocks; bc <= totalBlocks; bc++ {
+		//fmt.Println("BLOCK count", bc)
+		for i := range(block) {
+			block[i] = 0
+		}
+		for idx := 15; idx >=0; idx-- {
+			crafted := bytes.Repeat([]byte("A"), idx)
+			craftedWithFiller := append(filler, crafted...)
+			sig, _ := box.EncryptionOracle(craftedWithFiller)
+			sigBlock := sig[(bc-1)*16: bc*16]
+			//fmt.Println(sigBlock)
+			dict := generateDict(box, block, prevBlock, idx, filler, initBlocks)
+			//fmt.Println(dict)
+			val, exist := dict[string(sigBlock)]
+			if !exist {
+				panic("Phew")
+			}
+			if val == 1 {
+				break
+			}
+			block[15 - idx] = val
+		}
+		//fmt.Println(bc, block)
+		out = append(out, block...)
+		//copy(out[(bc-1)*16: bc*16], block)
+		copy(prevBlock, block)
+		//fmt.Println(">>", string(out), "<<<")
+	}
+
+	return out
 }
 
 func BreakECB(box BlackBox) ([]byte, error) {
@@ -456,7 +515,8 @@ func BreakECB(box BlackBox) ([]byte, error) {
 		if errOracle != nil {
 			return nilByte, errOracle
 		}
-		if analyzeECBBlock(cipher) == 2 {
+		count, _ := analyzeECBBlock(cipher) 
+		if count == 2 {
 			blockSize = i/2
 			break
 		}
@@ -466,40 +526,45 @@ func BreakECB(box BlackBox) ([]byte, error) {
 	if err2 != nil {
 		return nilByte, err2
 	}
-	
 	totalBlocks := len(cipher2)/blockSize
-	
-	// henceforth assuming block size 16
-	block := make([]byte, 16)
-	prevBlock := make([]byte, 16)
-	out := make([]byte, len(cipher2))
-	//totalBlocks = 1
-	for bc := 1; bc <= totalBlocks; bc++ {
-		//fmt.Println("BLOCK count", bc)
-		for i := range(block) {
-			block[i] = 0
-		}
-		for idx := 15; idx >=0; idx-- {
-			crafted := bytes.Repeat([]byte("A"), idx)
-			sig, _ := box.EncryptionOracle(crafted)
-			sigBlock := sig[(bc-1)*16: bc*16]
-			//fmt.Println(sigBlock)
-			dict := generateDict(box, crafted, block, prevBlock, idx, bc)
-			//fmt.Println(dict)
-			val, exist := dict[string(sigBlock)]
-			if !exist {
-				panic("Phew")
-			}
-			if val == 1 {
-				break
-			}
-			block[15 - idx] = val
-		}
-		//fmt.Println(bc, block)
-		copy(out[(bc-1)*16: bc*16], block)
-		copy(prevBlock, block)
-		fmt.Println(string(out))
-	}
-
+	out := decodeECB(box, []byte {}, 1, totalBlocks)
 	return out, nil
 }
+
+
+func BreakECBHarder(box BlackBox) ([]byte, error) {
+	var nilByte []byte
+	mode, err := DetectionOracle(box)
+	if err != nil {
+		return nilByte, err
+	}
+	if mode != "ECB" {
+		return nilByte, errors.New("block mode is not ECB")
+	}
+
+	fillerCount := 0
+	initBlockCount := 0
+	initSize := 0
+	for i := 1; i <= 50; i++ {
+		potion := bytes.Repeat([]byte("A"), i)
+		cipher, _ := box.EncryptionOracle(potion)
+		count, blk := analyzeECBBlock(cipher)
+		if count == 2 {
+			fillerCount = i - 32
+			fmt.Println("Index", bytes.Index(cipher, blk))
+			initSize = bytes.Index(cipher, blk)
+			initBlockCount = initSize/16 + 1
+			break
+		}
+	}
+	fmt.Println(initBlockCount, fillerCount)
+	filler := bytes.Repeat([]byte("A"), fillerCount)
+	total, _ := box.EncryptionOracle(filler)
+	totalBlock := len(total)/16
+	payloadSize := len(total) - initSize
+	fmt.Println("PL size", len(total), initSize, payloadSize, len(RandPrefix))
+	out := decodeECB(box, filler, initBlockCount, totalBlock)
+	//fmt.Println("PBC", payloadBlock)
+	return out, nil
+}
+	
