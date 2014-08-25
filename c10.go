@@ -5,13 +5,14 @@ import (
 	"./cryptutils"
 	"io/ioutil"
 	"encoding/base64"
+	"bytes"
 )
 
 
 
 func main() {
 	key := []byte("YELLOW SUBMARINE")
-	iv := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,}
+	iv := bytes.Repeat([]byte{0}, 16)
 	rawDat, err := ioutil.ReadFile("c10.txt")
 	if err != nil {
 		panic("file error")
