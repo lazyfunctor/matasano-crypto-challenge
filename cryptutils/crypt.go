@@ -72,12 +72,12 @@ var charFreq = map[byte]float64 {
 const penalty = 0.127
 
 var GlobalKey []byte
-var globalIV []byte
+var GlobalIV []byte
 var RandPrefix []byte
 
 func init() {
 	GlobalKey, _ = GenerateRandomKey(16)
-	globalIV, _ = GenerateRandomKey(16)
+	GlobalIV, _ = GenerateRandomKey(16)
 	count, _ := rand.Int(rand.Reader, big.NewInt(100))
 	RandPrefix, _ = GenerateRandomKey(int(count.Int64()) + 1)
 }
@@ -149,23 +149,27 @@ func PKCS7Padding(dat []byte, blockSize int) []byte {
 	return newDat
 }
 
-func Unpad(dat []byte) []byte {
+
+func Unpad(dat []byte) ([]byte, error) {
+	var nilByte []byte
 	datSize := len(dat)
 	lastByte := int(dat[datSize-1])
 	if (0 < lastByte) && (lastByte < 16) {
-		valid := false
+		valid := true
 		for idx := 0; idx < lastByte; idx++ {
 			iByte := int(dat[datSize - idx - 1])
 			if iByte != lastByte {
+				valid = false
 				break
 			}
-			valid = true
 		}
 		if valid {
-			return dat[: datSize - lastByte]
+			return dat[: datSize - lastByte], nil
+		} else {
+			return nilByte, errors.New("Invalid padding")
 		}
 	}
-	return dat
+	return dat, nil
 }
 
 func DecryptECB(cipher, key []byte) []byte {
@@ -266,7 +270,7 @@ func DecryptCBC(dat, key, iv []byte) ([]byte, error) {
 		copy(prevEBlock, dataBlock)
 		blockCount += 1
 	}
-	return Unpad(newDat), nil
+	return Unpad(newDat)
 }
 
 
