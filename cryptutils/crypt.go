@@ -186,7 +186,8 @@ func DecryptECB(cipher, key []byte) []byte {
 		copy(res[(blockCount - 1) * bs: (blockCount * bs)], out)
 		blockCount += 1
 	}
-	return res
+	dat, _ := Unpad(res)
+	return dat
 }
 
 func EncryptECB(inDat, key []byte) []byte {
