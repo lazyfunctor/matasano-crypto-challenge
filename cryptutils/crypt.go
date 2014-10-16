@@ -140,7 +140,7 @@ func RepeatXOR(data []byte, key []byte) []byte {
 
 func PKCS7Padding(dat []byte, blockSize int) []byte {
 	datSize := len(dat)
-	paddingReqd := ((2 * blockSize) - (datSize % (2 * blockSize))) % 16
+	paddingReqd := ((2 * blockSize) - (datSize % (2 * blockSize)))
 	newDat := make([]byte, datSize + paddingReqd)
 	copy(newDat[:datSize], dat)
 	for i := 0; i < paddingReqd; i++ {
@@ -149,30 +149,37 @@ func PKCS7Padding(dat []byte, blockSize int) []byte {
 	return newDat
 }
 
+func ValidPad(dat []byte) (valid bool) {
+	datSize := len(dat)
+	lastByte := int(dat[datSize-1])
+	valid = true
+	if lastByte > 16 || lastByte < 1 {
+		valid = false
+		return
+	}
+	for idx := 0; idx < lastByte; idx++ {
+		iByte := int(dat[datSize - idx - 1])
+		if iByte != lastByte {
+			valid = false
+			break
+		}
+	}
+	return
+}
 
 func Unpad(dat []byte) ([]byte, error) {
 	var nilByte []byte
 	datSize := len(dat)
 	lastByte := int(dat[datSize-1])
-	if (0 < lastByte) && (lastByte < 16) {
-		valid := true
-		for idx := 0; idx < lastByte; idx++ {
-			iByte := int(dat[datSize - idx - 1])
-			if iByte != lastByte {
-				valid = false
-				break
-			}
-		}
-		if valid {
-			return dat[: datSize - lastByte], nil
-		} else {
-			return nilByte, errors.New("Invalid padding")
-		}
+	valid := ValidPad(dat)
+	if valid {
+		return dat[: datSize - lastByte], nil
+	} else {
+		return nilByte, errors.New("Invalid padding")
 	}
-	return dat, nil
 }
 
-func DecryptECB(cipher, key []byte) []byte {
+func DecryptECB(cipher, key []byte) ([]byte) {
 	res := make([]byte, len(cipher))
 	bs := aes.BlockSize
 	inp := make([]byte, bs)
@@ -220,7 +227,8 @@ func FixedXOR(b1, b2 []byte) []byte {
 
 func EncryptCBC(inDat, key, iv []byte) ([]byte, error) {
 	dat := PKCS7Padding(inDat, aes.BlockSize/2)
-	//fmt.Println("after padding", len(dat))
+	fmt.Println("after padding", len(dat))
+	//fmt.Println(dat)
 	if len(iv) != aes.BlockSize {
 		return []byte {}, errors.New("Size of IV needs to be same as block size")
 	}
@@ -266,11 +274,14 @@ func DecryptCBC(dat, key, iv []byte) ([]byte, error) {
 	for blockCount * bs <= datSize {
 		dataBlock := dat[(blockCount - 1) * bs : blockCount * bs]
 		cipher.Decrypt(curDBlock, dataBlock)
+		//fmt.Println("prev block", prevEBlock)
+		//fmt.Println("cur d block", curDBlock)
 		block := FixedXOR(prevEBlock, curDBlock)
 		copy(newDat[(blockCount - 1) * bs : blockCount * bs], block)
 		copy(prevEBlock, dataBlock)
 		blockCount += 1
 	}
+	//fmt.Println(newDat)
 	return Unpad(newDat)
 }
 

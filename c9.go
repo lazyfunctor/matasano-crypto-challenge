@@ -4,5 +4,7 @@ import "fmt"
 import "./cryptutils"
 
 func main() {
-	fmt.Println(cryptutils.PKCS7Padding([]byte("YELLOW SUBMARINE"), 10))
+	padded := cryptutils.PKCS7Padding([]byte("YELLOW SUBMARINE"), 16)
+	unpadded, _ := cryptutils.Unpad(padded)
+	fmt.Println(unpadded)
 }
