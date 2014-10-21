@@ -217,12 +217,29 @@ func EncryptECB(inDat, key []byte) []byte {
 
 
 func FixedXOR(b1, b2 []byte) []byte {
-	b3 := make([]byte, len(b1))
-	for i := range(b1) {
+	l1 := len(b1)
+	l2 := len(b2)
+	size := 0
+	if l1 <= l2 {
+		size = l1
+	} else {
+		size = l2
+	}
+	b3 := make([]byte, size)
+	for i := 0; i < size; i++ {
 		b3[i] = b1[i] ^ b2[i]
 	}
 	return b3
 }
+
+
+// func FixedXOR(b1, b2 []byte) []byte {
+// 	b3 := make([]byte, len(b1))
+// 	for i := range(b1) {
+// 		b3[i] = b1[i] ^ b2[i]
+// 	}
+// 	return b3
+// }
 
 
 func EncryptCBC(inDat, key, iv []byte) ([]byte, error) {
@@ -584,3 +601,77 @@ func BreakECBHarder(box BlackBox) ([]byte, error) {
 	return out, nil
 }
 	
+
+func DecryptCTR(ctext []byte, key []byte, nonce []byte) (ptext []byte, err error) {
+	ctr := []byte {0, 0, 0, 0, 0, 0, 0, 0}
+	size := len(ctext)
+	block := 1
+	cipher, err := aes.NewCipher(key)
+	last := false
+	encBlock := make([]byte, 16)
+	var curBlock []byte
+	for {
+		if block * 16 <= size {
+			curBlock = ctext[(block-1)*16: block*16]
+		} else {
+			curBlock = ctext[(block-1)*16:]
+			last = true
+		}
+		pad := append(nonce, ctr...)
+		cipher.Encrypt(encBlock, pad)
+		cBlock := FixedXOR(encBlock, curBlock)
+		ptext = append(ptext, cBlock...)
+		if last {
+			break
+		}
+		block += 1
+		ctr = incrementCounter(ctr, 1)
+	}
+	return
+
+}
+
+
+func EncryptCTR(ptext []byte, key []byte, nonce []byte) (ctext []byte, err error) {
+	ctr := []byte {0, 0, 0, 0, 0, 0, 0, 0}
+	size := len(ptext)
+	block := 1
+	cipher, err := aes.NewCipher(key)
+	last := false
+	encBlock := make([]byte, 16)
+	var curBlock []byte
+	for {
+		if block * 16 <= size {
+			curBlock = ptext[(block-1)*16: block*16]
+		} else {
+			curBlock = ptext[(block-1)*16:]
+			last = true
+		}
+		pad := append(nonce, ctr...)
+		cipher.Encrypt(encBlock, pad)
+		cBlock := FixedXOR(encBlock, curBlock)
+		ctext = append(ctext, cBlock...)
+		if last {
+			break
+		}
+		block += 1
+		ctr = incrementCounter(ctr, 1)
+	}
+	return
+
+}
+
+
+func incrementCounter(iv []byte, count int) []byte {
+	size := len(iv)
+	newIV := make([]byte, size)
+	copy(newIV, iv)
+	for idx := 0; idx < size; idx++ {
+		newIV[idx] += byte(count)
+		if newIV[idx] != 0 {
+			break
+		}
+	}
+	return newIV
+}
+
