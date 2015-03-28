@@ -1,4 +1,5 @@
 matasano-crypto-challenge
 =========================
 
-My attempt at solving  Matasano crypto challenges using golang
+Matasano crypto challenges section 1, 2 and 3 (partial) implemented in golang.
+http://cryptopals.com/
